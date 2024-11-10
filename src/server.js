@@ -1,16 +1,39 @@
 const express = require('express');
+const { initializeDatabase } = require('./initDB');
+const configurarRutas = require('./routes/bingo.routes');
+
 const app = express();
 const port = 3000;
 
-app.get('/api/disparo', (req, res) => {
-    const ahora = new Date();
-    res.json({
-        hora: ahora.toLocaleTimeString(),
-        fecha: ahora.toLocaleDateString(),
-        completa: ahora.toLocaleString()
-    });
-});
+let db;
 
-app.listen(port, () => {
-    console.log(`Servidor corriendo en http://localhost:${port}`);
+initializeDatabase()
+    .then((database) => {
+        db = database;
+        
+        // Configurar las rutas
+        app.use('/api', configurarRutas(db));
+
+        // Iniciar el servidor
+        app.listen(port, () => {
+            console.log(`Servidor corriendo en http://localhost:${port}`);
+        });
+    })
+    .catch(err => {
+        console.error('Error al inicializar la aplicación:', err);
+        process.exit(1);
+    });
+
+// Manejar el cierre de la aplicación
+process.on('SIGINT', () => {
+    if (db) {
+        db.close((err) => {
+            if (err) {
+                console.error('Error al cerrar la base de datos:', err);
+            } else {
+                console.log('Conexión con la base de datos cerrada');
+            }
+            process.exit(err ? 1 : 0);
+        });
+    }
 });
