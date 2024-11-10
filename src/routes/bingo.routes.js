@@ -28,20 +28,25 @@ function configurarRutas(db) {
             const numeroString = numero.toString();
             const horaBogota = moment().tz(TIMEZONE);
             
-            // Extraer la hora del bingo de fecha_bingo y formatearla
-            const horaBingo = moment(fecha_bingo).tz(TIMEZONE).format('HH:mm');
-            const fechaFormateada = moment(fecha_bingo).tz(TIMEZONE).format('YYYY-MM-DD');
+            // Usar la hora exacta del bingo
+            const momentoBingo = moment(fecha_bingo).tz(TIMEZONE);
+            const fechaFormateada = momentoBingo.format('YYYY-MM-DD');
+            const horaFormateada = momentoBingo.format('HH:mm');
+            
+            console.log('Construyendo nombre de evento:');
+            console.log('Fecha bingo:', fechaFormateada);
+            console.log('Hora bingo:', horaFormateada);
+    
+            const nombreEvento = `Bingo_${fechaFormateada}_${horaFormateada}`;
             
             const mensaje = {
                 numero: numeroString,
                 sec: secuencia,
                 timestamp: horaBogota.format('YYYY-MM-DD HH:mm:ss'),
-                zonaHoraria: TIMEZONE
+                zonaHoraria: TIMEZONE,
+                horaBingo: momentoBingo.format('YYYY-MM-DD HH:mm:ss')
             };
     
-            // Construir el nombre del evento con fecha y hora
-            const nombreEvento = `Bingo_${fechaFormateada}_${horaBingo}`;
-            
             const data = {
                 canal: process.env.SOCKET_CANAL,
                 token: process.env.SOCKET_TOKEN,
@@ -118,27 +123,22 @@ function configurarRutas(db) {
                     );
                 });
     
-                // Formatear fecha y hora para el evento
-                const fechaHoraBingo = new Date(bingo.empieza);
-                const fecha = fechaHoraBingo.toISOString().split('T')[0];
-                const hora = `${fechaHoraBingo.getHours()}:${fechaHoraBingo.getMinutes() === 0 ? '00' : '30'}`;
+                // Obtener la hora exacta del bingo
+                const horaBingo = moment(bingo.empieza).tz(TIMEZONE);
+                console.log('Hora del bingo:', horaBingo.format('YYYY-MM-DD HH:mm'));
     
-                // Emitir evento con el nuevo formato
-                await emitirEvento(nuevoNumero, secuencia, fecha, hora);
+                // Emitir evento con la hora correcta del bingo
+                await emitirEvento(nuevoNumero, secuencia, bingo.empieza);
     
-                console.log(`Bingo ${bingoId}: Nuevo número generado: ${nuevoNumero} (${secuencia}/75)`);
-                console.log(`Evento emitido como: Bingo_${fecha}_${hora}`);
-    
-                // ... resto del código igual ...
-    
+                // ... resto del código
             } catch (error) {
                 console.error(`Error en generación de números para bingo ${bingoId}:`, error);
             }
         }, parseInt(process.env.INTERVALO) * 1000);
     
         intervalosActivos.set(bingoId, intervalo);
-        console.log(`Iniciada generación de números para bingo ${bingoId}`);
     }
+    
 
 
 
