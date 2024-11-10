@@ -1,31 +1,32 @@
-// Modificar rutas_web.js para servir HTML
+// rutas_web.js
 const express = require('express');
 const router = express.Router();
 const moment = require('moment-timezone');
 const TIMEZONE = 'America/Bogota';
-const path = require('path');
 
 function configurarRutasWeb(db) {
-    // Servir archivos estáticos
-    router.use(express.static('public'));
-
-    // Ruta para la página web
+    // Ruta para la página web del historial
     router.get('/', (req, res) => {
-        SELECT 
-            id,
-            session,
-            empieza,
-            termino,
-            observadores,
-            created_at,
-            numeros,
-            CASE 
-                WHEN datetime(empieza) > datetime('now') THEN 'futuro'
-                WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
-            END as estado
-        FROM bingos 
-        ORDER BY datetime(empieza) DESC
-    `;
+        const page = parseInt(req.query.page) || 1;
+        const perPage = 10; // Registros por página
+        const offset = (page - 1) * perPage;
+
+        const query = `
+            SELECT 
+                id,
+                session,
+                empieza,
+                termino,
+                observadores,
+                created_at,
+                numeros,
+                CASE 
+                    WHEN datetime(empieza) > datetime('now') THEN 'futuro'
+                    WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
+                END as estado
+            FROM bingos 
+            ORDER BY datetime(empieza) DESC
+        `;
 
         db.all(query, [], (err, rows) => {
             if (err) {
@@ -34,7 +35,7 @@ function configurarRutasWeb(db) {
 
             const bingos = rows.map(row => {
                 const momentoInicio = moment(row.empieza).tz(TIMEZONE);
-                const numerosArray = row.numeros ? row.numeros.split(',').map(Number) : [];
+                const numerosArray = row.numeros ? row.numeros.split(',').map(Number).sort((a, b) => a - b) : [];
                 return {
                     id: row.id,
                     estado: row.estado,
@@ -44,10 +45,12 @@ function configurarRutasWeb(db) {
                     observadores: row.observadores,
                     numerosTotales: numerosArray.length,
                     ultimoNumero: numerosArray.length > 0 ? numerosArray[numerosArray.length - 1] : null,
-                    numeros: numerosArray,
-                    nombreEvento: `Bingo_${momentoInicio.format('YYYY-MM-DD_HH:mm')}`
+                    numeros: numerosArray
                 };
             });
+
+            const totalPages = Math.ceil(bingos.length / perPage);
+            const currentPage = page;
 
             res.send(`
 <!DOCTYPE html>
@@ -57,7 +60,6 @@ function configurarRutasWeb(db) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Historial de Bingos</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/@heroicons/react@2.0.18/outline.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
     <div class="min-h-screen">
@@ -96,7 +98,7 @@ function configurarRutasWeb(db) {
             </div>
 
             <!-- Tabla de bingos -->
-            <div class="bg-white shadow-md rounded-lg overflow-hidden">
+            <div class="bg-white shadow-md rounded-lg overflow-hidden mb-8">
                 <div class="px-4 py-5 sm:px-6 bg-gray-50">
                     <h3 class="text-lg leading-6 font-medium text-gray-900">
                         Lista de Bingos
@@ -110,10 +112,7 @@ function configurarRutasWeb(db) {
                                     ID
                                 </th>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Fecha
-                                </th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Hora
+                                    Fecha y Hora
                                 </th>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Estado
@@ -130,22 +129,21 @@ function configurarRutasWeb(db) {
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            ${bingos.map(bingo => `
+                            ${bingos.slice(offset, offset + perPage).map(bingo => `
                                 <tr class="hover:bg-gray-50">
                                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                         ${bingo.id}
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        ${bingo.fecha}
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        ${bingo.hora}
+                                        ${bingo.fecha} ${bingo.hora}
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                             ${bingo.estado === 'futuro' 
                                                 ? 'bg-green-100 text-green-800' 
-                                                : 'bg-gray-100 text-gray-800'}">
+                                                : bingo.sesion === 'RUNNING'
+                                                    ? 'bg-blue-100 text-blue-800'
+                                                    : 'bg-gray-100 text-gray-800'}">
                                             ${bingo.sesion}
                                         </span>
                                     </td>
@@ -164,100 +162,102 @@ function configurarRutasWeb(db) {
                     </table>
                 </div>
             </div>
-        </main>
-<div class="mt-8 bg-white shadow-md rounded-lg overflow-hidden">
-    <div class="px-4 py-5 sm:px-6 bg-gray-50">
-        <h3 class="text-lg leading-6 font-medium text-gray-900">
-            Detalle de Números Jugados
-        </h3>
-    </div>
 
-    <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        ID Bingo
-                    </th>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Fecha y Hora
-                    </th>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Total Números
-                    </th>
-                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Números Jugados
-                    </th>
-                </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-                ${bingos.slice(offset, offset + perPage).map(bingo => `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            ${bingo.id}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            ${bingo.fecha} ${bingo.hora}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            ${bingo.numerosTotales}/75
-                        </td>
-                        <td class="px-6 py-4 text-sm text-gray-500">
-                            <div class="flex flex-wrap gap-1 max-w-2xl">
-                                ${bingo.numeros.map(num => `
-                                    <span class="inline-flex items-center justify-center h-6 w-6 rounded bg-blue-100 text-blue-800 text-xs font-medium">
-                                        ${num}
-                                    </span>
+            <!-- Detalle de números jugados -->
+            <div class="bg-white shadow-md rounded-lg overflow-hidden">
+                <div class="px-4 py-5 sm:px-6 bg-gray-50">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">
+                        Detalle de Números Jugados
+                    </h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    ID Bingo
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Fecha y Hora
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Total Números
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Números Jugados
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            ${bingos.slice(offset, offset + perPage).map(bingo => `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        ${bingo.id}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        ${bingo.fecha} ${bingo.hora}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        ${bingo.numerosTotales}/75
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-500">
+                                        <div class="flex flex-wrap gap-1 max-w-2xl">
+                                            ${bingo.numeros.map(num => `
+                                                <span class="inline-flex items-center justify-center h-6 w-6 rounded bg-blue-100 text-blue-800 text-xs font-medium">
+                                                    ${num}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Paginación -->
+                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                    <div class="flex-1 flex justify-between sm:hidden">
+                        ${currentPage > 1 ? `
+                            <a href="?page=${currentPage - 1}" 
+                               class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                                Anterior
+                            </a>
+                        ` : ''}
+                        ${currentPage < totalPages ? `
+                            <a href="?page=${currentPage + 1}" 
+                               class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                                Siguiente
+                            </a>
+                        ` : ''}
+                    </div>
+                    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                        <div>
+                            <p class="text-sm text-gray-700">
+                                Mostrando <span class="font-medium">${offset + 1}</span> a 
+                                <span class="font-medium">${Math.min(offset + perPage, bingos.length)}</span> de 
+                                <span class="font-medium">${bingos.length}</span> resultados
+                            </p>
+                        </div>
+                        <div>
+                            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                                ${Array.from({ length: totalPages }, (_, i) => i + 1).map(page => `
+                                    <a href="?page=${page}" 
+                                       class="relative inline-flex items-center px-4 py-2 border border-gray-300 
+                                            ${currentPage === page 
+                                                ? 'bg-blue-50 border-blue-500 text-blue-600 z-10' 
+                                                : 'bg-white text-gray-500 hover:bg-gray-50'} 
+                                            text-sm font-medium">
+                                        ${page}
+                                    </a>
                                 `).join('')}
-                            </div>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    </div>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
 
-    <!-- Paginación -->
-    <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-        <div class="flex-1 flex justify-between sm:hidden">
-            ${currentPage > 1 ? `
-                <a href="?page=${currentPage - 1}" 
-                   class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                    Anterior
-                </a>
-            ` : ''}
-            ${currentPage < totalPages ? `
-                <a href="?page=${currentPage + 1}" 
-                   class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                    Siguiente
-                </a>
-            ` : ''}
-        </div>
-        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-            <div>
-                <p class="text-sm text-gray-700">
-                    Mostrando <span class="font-medium">${offset + 1}</span> a 
-                    <span class="font-medium">${Math.min(offset + perPage, bingos.length)}</span> de 
-                    <span class="font-medium">${bingos.length}</span> resultados
-                </p>
-            </div>
-            <div>
-                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                    ${Array.from({ length: totalPages }, (_, i) => i + 1).map(page => `
-                        <a href="?page=${page}" 
-                           class="relative inline-flex items-center px-4 py-2 border border-gray-300 
-                                ${currentPage === page 
-                                    ? 'bg-blue-50 border-blue-500 text-blue-600 z-10' 
-                                    : 'bg-white text-gray-500 hover:bg-gray-50'} 
-                                text-sm font-medium">
-                            ${page}
-                        </a>
-                    `).join('')}
-                </nav>
-            </div>
-        </div>
-    </div>
-</div>
         <!-- Footer -->
         <footer class="bg-white shadow mt-8">
             <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
