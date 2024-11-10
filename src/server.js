@@ -14,7 +14,7 @@ initializeDatabase()
         
         // Configurar las rutas
         app.use('/api', configurarRutas(db));
-        app.use('/web', configurarRutasWeb(db)); 
+        app.use('/', configurarRutasWeb(db)); 
 
         // Iniciar el servidor
         app.listen(port, () => {

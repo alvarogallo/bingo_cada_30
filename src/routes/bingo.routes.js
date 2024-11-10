@@ -33,18 +33,13 @@ function configurarRutas(db) {
             const fechaFormateada = momentoBingo.format('YYYY-MM-DD');
             const horaFormateada = momentoBingo.format('HH:mm');
             
-            console.log('Construyendo nombre de evento:');
-            console.log('Fecha bingo:', fechaFormateada);
-            console.log('Hora bingo:', horaFormateada);
-    
             const nombreEvento = `Bingo_${fechaFormateada}_${horaFormateada}`;
             
             const mensaje = {
                 numero: numeroString,
                 sec: secuencia,
                 timestamp: horaBogota.format('YYYY-MM-DD HH:mm:ss'),
-                zonaHoraria: TIMEZONE,
-                horaBingo: momentoBingo.format('YYYY-MM-DD HH:mm:ss')
+                zonaHoraria: TIMEZONE
             };
     
             const data = {

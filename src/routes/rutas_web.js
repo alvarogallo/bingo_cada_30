@@ -10,23 +10,22 @@ function configurarRutasWeb(db) {
     router.use(express.static('public'));
 
     // Ruta para la página web
-    router.get('/historial', (req, res) => {
-        const query = `
-            SELECT 
-                id,
-                session,
-                empieza,
-                termino,
-                observadores,
-                created_at,
-                numeros,
-                CASE 
-                    WHEN datetime(empieza) > datetime('now') THEN 'futuro'
-                    WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
-                END as estado
-            FROM bingos 
-            ORDER BY datetime(empieza) DESC
-        `;
+    router.get('/', (req, res) => {
+        SELECT 
+            id,
+            session,
+            empieza,
+            termino,
+            observadores,
+            created_at,
+            numeros,
+            CASE 
+                WHEN datetime(empieza) > datetime('now') THEN 'futuro'
+                WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
+            END as estado
+        FROM bingos 
+        ORDER BY datetime(empieza) DESC
+    `;
 
         db.all(query, [], (err, rows) => {
             if (err) {
@@ -166,7 +165,99 @@ function configurarRutasWeb(db) {
                 </div>
             </div>
         </main>
+<div class="mt-8 bg-white shadow-md rounded-lg overflow-hidden">
+    <div class="px-4 py-5 sm:px-6 bg-gray-50">
+        <h3 class="text-lg leading-6 font-medium text-gray-900">
+            Detalle de Números Jugados
+        </h3>
+    </div>
 
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        ID Bingo
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Fecha y Hora
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Total Números
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Números Jugados
+                    </th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                ${bingos.slice(offset, offset + perPage).map(bingo => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            ${bingo.id}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            ${bingo.fecha} ${bingo.hora}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            ${bingo.numerosTotales}/75
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-500">
+                            <div class="flex flex-wrap gap-1 max-w-2xl">
+                                ${bingo.numeros.map(num => `
+                                    <span class="inline-flex items-center justify-center h-6 w-6 rounded bg-blue-100 text-blue-800 text-xs font-medium">
+                                        ${num}
+                                    </span>
+                                `).join('')}
+                            </div>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+        <div class="flex-1 flex justify-between sm:hidden">
+            ${currentPage > 1 ? `
+                <a href="?page=${currentPage - 1}" 
+                   class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Anterior
+                </a>
+            ` : ''}
+            ${currentPage < totalPages ? `
+                <a href="?page=${currentPage + 1}" 
+                   class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Siguiente
+                </a>
+            ` : ''}
+        </div>
+        <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+            <div>
+                <p class="text-sm text-gray-700">
+                    Mostrando <span class="font-medium">${offset + 1}</span> a 
+                    <span class="font-medium">${Math.min(offset + perPage, bingos.length)}</span> de 
+                    <span class="font-medium">${bingos.length}</span> resultados
+                </p>
+            </div>
+            <div>
+                <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                    ${Array.from({ length: totalPages }, (_, i) => i + 1).map(page => `
+                        <a href="?page=${page}" 
+                           class="relative inline-flex items-center px-4 py-2 border border-gray-300 
+                                ${currentPage === page 
+                                    ? 'bg-blue-50 border-blue-500 text-blue-600 z-10' 
+                                    : 'bg-white text-gray-500 hover:bg-gray-50'} 
+                                text-sm font-medium">
+                            ${page}
+                        </a>
+                    `).join('')}
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
         <!-- Footer -->
         <footer class="bg-white shadow mt-8">
             <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
