@@ -1,6 +1,7 @@
 const express = require('express');
 const { initializeDatabase } = require('./initDB');
 const configurarRutas = require('./routes/bingo.routes');
+const configurarRutasWeb = require('./routes/rutas_web');
 
 const app = express();
 const port = 3000;
@@ -13,6 +14,7 @@ initializeDatabase()
         
         // Configurar las rutas
         app.use('/api', configurarRutas(db));
+        app.use('/web', configurarRutasWeb(db)); 
 
         // Iniciar el servidor
         app.listen(port, () => {
