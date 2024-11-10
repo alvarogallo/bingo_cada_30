@@ -2,56 +2,39 @@
 const express = require('express');
 const cron = require('node-cron');
 const router = express.Router();
+const moment = require('moment-timezone'); 
 require('dotenv').config();
+
+
+const TIMEZONE = 'America/Bogota';
+moment.tz.setDefault(TIMEZONE);
+
+// Función helper para obtener hora actual en Bogotá
+function getHoraBogota() {
+    return moment().tz(TIMEZONE);
+}
+
+// Función para formatear fecha en zona Bogotá
+function formatearFecha(fecha) {
+    return moment(fecha).tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss');
+}
 
 
 function configurarRutas(db) {
     const intervalosActivos = new Map();
 
-    async function emitirEvento(numero, secuencia, fecha_bingo, hora_bingo) {
+    async function emitirEvento(numero, secuencia, fecha_bingo) {
         try {
-            const numeroString = numero.toString();
-            
-            // Formatear la hora (convertir "8:30" a "08:30")
-            const [horas, minutos] = hora_bingo.split(':');
-            const horaFormateada = `${horas.padStart(2, '0')}:${minutos}`;
-            
+            const horaBogota = getHoraBogota();
             const mensaje = {
-                numero: numeroString,
+                numero: numero.toString(),
                 sec: secuencia,
-                timestamp: new Date().toISOString()
+                timestamp: horaBogota.format('YYYY-MM-DD HH:mm:ss'),
+                zonaHoraria: TIMEZONE
             };
     
-            const nombreEvento = `Bingo_${fecha_bingo}_${horaFormateada}`;
-            
-            const data = {
-                canal: process.env.SOCKET_CANAL,
-                token: process.env.SOCKET_TOKEN,
-                evento: nombreEvento,
-                mensaje: mensaje
-            };
+            // ... resto del código de emitirEvento ...
     
-            console.log(`Enviando a socket.io: ${JSON.stringify(data)}`);
-            
-            const response = await fetch(process.env.SOCKET_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(JSON.stringify(data))
-                },
-                body: JSON.stringify(data)
-            });
-    
-            const httpCode = response.status;
-            const responseData = await response.text();
-            
-            console.log('Status Code:', httpCode);
-            console.log('Response:', responseData);
-            
-            return {
-                httpCode,
-                response: responseData
-            };
         } catch (error) {
             console.error('Error al emitir evento:', error);
             throw error;
@@ -175,10 +158,19 @@ function configurarRutas(db) {
         }
     }
 
-    // Programar la tarea para que se ejecute en el minuto 00 y 30 de cada hora
     cron.schedule('0,30 * * * *', () => {
+        const ahora = getHoraBogota();
+        console.log('=====================================');
+        console.log(`Ejecutando tarea programada:`);
+        console.log(`Hora Bogotá: ${ahora.format('YYYY-MM-DD HH:mm:ss')}`);
+        console.log('=====================================');
+        
         actualizarBingoActual();
+    }, {
+        scheduled: true,
+        timezone: TIMEZONE
     });
+    
 
 
     // También ejecutamos la verificación al iniciar el servidor
@@ -226,45 +218,39 @@ async function limpiarBingosAntiguos() {
     }
 }
 
-    // Función para obtener las próximas 3 horas válidas desde ahora
-    function obtenerProximasHoras(desde) {
-        const horas = [];
-        const horaInicio = new Date(desde);
-        
-        // Ajustar a la próxima media hora o hora en punto
-        const minutos = horaInicio.getMinutes();
-        const nuevaHora = new Date(horaInicio);
-        
-        if (minutos >= 30) {
-            // Si pasó la media hora, la siguiente será a la hora en punto
-            nuevaHora.setHours(horaInicio.getHours() + 1);
-            nuevaHora.setMinutes(0);
-        } else {
-            // Si no llegó a la media hora, la siguiente será a la media hora
-            nuevaHora.setMinutes(30);
-        }
-        nuevaHora.setSeconds(0);
-        nuevaHora.setMilliseconds(0);
-
-        // Solo agregar si es futuro
-        if (nuevaHora > horaInicio) {
-            horas.push(new Date(nuevaHora));
-        }
-
-        // Agregar las siguientes dos horas
-        for (let i = 1; i < 3; i++) {
-            const siguienteHora = new Date(nuevaHora);
-            if (nuevaHora.getMinutes() === 0) {
-                siguienteHora.setMinutes(30 * i);
-            } else {
-                siguienteHora.setHours(siguienteHora.getHours() + Math.floor((i + 1) / 2));
-                siguienteHora.setMinutes(i % 2 === 0 ? 30 : 0);
-            }
-            horas.push(siguienteHora);
-        }
-
-        return horas;
+function obtenerProximasHoras(desde) {
+    const horas = [];
+    const horaInicio = moment(desde).tz(TIMEZONE);
+    
+    // Ajustar a la próxima media hora o hora en punto
+    if (horaInicio.minutes() >= 30) {
+        horaInicio.add(1, 'hour').minutes(0);
+    } else {
+        horaInicio.minutes(30);
     }
+    horaInicio.seconds(0).milliseconds(0);
+
+    // Solo agregar si es futuro
+    if (horaInicio.isAfter(moment())) {
+        horas.push(horaInicio.format());
+    }
+
+    // Agregar las siguientes dos horas
+    for (let i = 1; i < 3; i++) {
+        const siguienteHora = moment(horaInicio).tz(TIMEZONE);
+        if (horaInicio.minutes() === 0) {
+            siguienteHora.minutes(30 * i);
+        } else {
+            siguienteHora.add(Math.floor((i + 1) / 2), 'hours');
+            siguienteHora.minutes(i % 2 === 0 ? 30 : 0);
+        }
+        horas.push(siguienteHora.format());
+    }
+
+    return horas;
+}
+    // Función para obtener las próximas 3 horas válidas desde ahora
+
 
     // Función para crear nuevo bingo
     async function crearNuevoBingo(horaInicio) {
@@ -494,10 +480,10 @@ async function limpiarBingosAntiguos() {
                     id: row.id,
                     estado: row.estado,
                     sesion: row.session,
-                    inicio: new Date(row.empieza).toISOString(), // Formato UTC
-                    termino: row.termino ? new Date(row.termino).toISOString() : null, // Formato UTC
+                    inicio: formatearFecha(row.empieza),
+                    termino: row.termino ? formatearFecha(row.termino) : null,
                     observadores: row.observadores,
-                    creado: new Date(row.created_at).toISOString(), // Formato UTC
+                    creado: formatearFecha(row.created_at),
                     numeros: {
                         lista: numerosArray,
                         total: numerosArray.length,
@@ -509,7 +495,8 @@ async function limpiarBingosAntiguos() {
             res.json({
                 success: true,
                 total: registros.length,
-                horaConsulta: new Date().toISOString(), // Hora actual en UTC
+                horaConsulta: formatearFecha(new Date()),
+                zonaHoraria: TIMEZONE,
                 registros: registros,
                 resumen: {
                     futuros: registros.filter(r => r.estado === 'futuro').length,
@@ -520,6 +507,7 @@ async function limpiarBingosAntiguos() {
             });
         });
     });
+
 
     // Ruta para obtener un registro específico
     router.get('/registro/:id', (req, res) => {
