@@ -28,6 +28,10 @@ function configurarRutas(db) {
             const numeroString = numero.toString();
             const horaBogota = moment().tz(TIMEZONE);
             
+            // Extraer la hora del bingo de fecha_bingo y formatearla
+            const horaBingo = moment(fecha_bingo).tz(TIMEZONE).format('HH:mm');
+            const fechaFormateada = moment(fecha_bingo).tz(TIMEZONE).format('YYYY-MM-DD');
+            
             const mensaje = {
                 numero: numeroString,
                 sec: secuencia,
@@ -35,18 +39,19 @@ function configurarRutas(db) {
                 zonaHoraria: TIMEZONE
             };
     
+            // Construir el nombre del evento con fecha y hora
+            const nombreEvento = `Bingo_${fechaFormateada}_${horaBingo}`;
+            
             const data = {
                 canal: process.env.SOCKET_CANAL,
                 token: process.env.SOCKET_TOKEN,
-                evento: `Bingo_${fecha_bingo}`,
+                evento: nombreEvento,
                 mensaje: mensaje
             };
     
-            console.log('=== DEBUG SOCKET.IO ===');
-            console.log('URL:', process.env.SOCKET_URL);
-            console.log('Canal:', process.env.SOCKET_CANAL);
-            console.log('Data a enviar:', JSON.stringify(data, null, 2));
-            
+            console.log(`Enviando evento: ${nombreEvento}`);
+            console.log('Data:', JSON.stringify(data, null, 2));
+    
             const response = await fetch(process.env.SOCKET_URL, {
                 method: 'POST',
                 headers: {
@@ -61,25 +66,17 @@ function configurarRutas(db) {
             
             console.log('Status Code:', httpCode);
             console.log('Response:', responseData);
-            console.log('=== FIN DEBUG SOCKET.IO ===');
             
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}, response: ${responseData}`);
-            }
-    
             return {
                 httpCode,
                 response: responseData
             };
         } catch (error) {
-            console.error('Error detallado al emitir evento:', {
-                mensaje: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
+            console.error('Error al emitir evento:', error);
             throw error;
         }
     }
+
     function generarNuevoNumero(numerosActuales) {
         const numerosUsados = numerosActuales ? numerosActuales.split(',').map(Number) : [];
         let nuevoNumero;
