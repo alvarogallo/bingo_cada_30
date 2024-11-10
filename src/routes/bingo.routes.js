@@ -180,8 +180,51 @@ function configurarRutas(db) {
         actualizarBingoActual();
     });
 
+
     // También ejecutamos la verificación al iniciar el servidor
     actualizarBingoActual();
+
+// En bingo.routes.js
+
+// Función para limpiar bingos antiguos
+async function limpiarBingosAntiguos() {
+    try {
+        // Primero contar cuántos bingos hay
+        const count = await new Promise((resolve, reject) => {
+            db.get('SELECT COUNT(*) as total FROM bingos', [], (err, row) => {
+                if (err) reject(err);
+                else resolve(row.total);
+            });
+        });
+
+        console.log(`Total de bingos en la base de datos: ${count}`);
+
+        // Si hay más de 200, eliminar los más antiguos
+        if (count > 200) {
+            const exceso = count - 200;
+            console.log(`Eliminando ${exceso} bingos antiguos...`);
+
+            await new Promise((resolve, reject) => {
+                db.run(`
+                    DELETE FROM bingos 
+                    WHERE id IN (
+                        SELECT id FROM bingos 
+                        ORDER BY datetime(empieza) ASC 
+                        LIMIT ?
+                    )
+                `, [exceso], function(err) {
+                    if (err) reject(err);
+                    else {
+                        console.log(`Bingos eliminados: ${this.changes}`);
+                        resolve(this.changes);
+                    }
+                });
+            });
+        }
+    } catch (error) {
+        console.error('Error al limpiar bingos antiguos:', error);
+    }
+}
 
     // Función para obtener las próximas 3 horas válidas desde ahora
     function obtenerProximasHoras(desde) {
@@ -225,24 +268,89 @@ function configurarRutas(db) {
 
     // Función para crear nuevo bingo
     async function crearNuevoBingo(horaInicio) {
-        return new Promise((resolve, reject) => {
-            const horaISO = horaInicio instanceof Date ? horaInicio.toISOString() : horaInicio;
-            db.run(`
-                INSERT INTO bingos (session, empieza, numeros, termino, observadores)
-                VALUES (?, ?, ?, ?, ?)
-            `, ['PROGRAMADA', horaISO, '', '', 1],
-            function(err) {
-                if (err) {
-                    console.error('Error al crear nuevo bingo:', err);
-                    reject(err);
-                } else {
-                    console.log(`Nuevo bingo creado (ID: ${this.lastID}) programado para: ${new Date(horaISO).toLocaleString()}`);
-                    resolve(this.lastID);
+        return new Promise(async (resolve, reject) => {
+            try {
+                // Primero limpiar bingos antiguos
+                await limpiarBingosAntiguos();
+    
+                // Luego crear el nuevo bingo
+                db.run(`
+                    INSERT INTO bingos (session, empieza, numeros, termino, observadores)
+                    VALUES (?, ?, ?, ?, ?)
+                `, ['PROGRAMADA', horaInicio, '', '', 1],
+                function(err) {
+                    if (err) {
+                        console.error('Error al crear nuevo bingo:', err);
+                        reject(err);
+                    } else {
+                        console.log(`Nuevo bingo creado (ID: ${this.lastID}) programado para: ${horaInicio}`);
+                        resolve(this.lastID);
+                    }
+                });
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+    router.get('/traer/:id', (req, res) => {
+        const bingoId = req.params.id;
+    
+        const query = `
+            SELECT 
+                id,
+                session,
+                empieza,
+                termino,
+                observadores,
+                created_at,
+                numeros,
+                CASE 
+                    WHEN datetime(empieza) > datetime('now') THEN 'futuro'
+                    WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
+                END as estado
+            FROM bingos 
+            WHERE id = ?
+        `;
+    
+        db.get(query, [bingoId], (err, row) => {
+            if (err) {
+                res.status(500).json({ 
+                    success: false, 
+                    error: err.message 
+                });
+                return;
+            }
+    
+            if (!row) {
+                res.status(404).json({
+                    success: false,
+                    mensaje: `No se encontró el bingo con ID ${bingoId}`
+                });
+                return;
+            }
+    
+            // Convertir string de números a array
+            const numerosArray = row.numeros ? row.numeros.split(',').map(Number) : [];
+    
+            res.json({
+                success: true,
+                bingo: {
+                    id: row.id,
+                    estado: row.estado,
+                    sesion: row.session,
+                    inicio: new Date(row.empieza).toLocaleString(),
+                    termino: row.termino ? new Date(row.termino).toLocaleString() : null,
+                    observadores: row.observadores,
+                    creado: new Date(row.created_at).toLocaleString(),
+                    numeros: {
+                        lista: numerosArray,
+                        total: numerosArray.length,
+                        ultimoNumero: numerosArray.length > 0 ? numerosArray[numerosArray.length - 1] : null
+                    }
                 }
             });
         });
-    }
-
+    });
     // Ruta para disparo
     router.get('/disparo', async (req, res) => {
         const ahora = new Date();
