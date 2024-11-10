@@ -1,8 +1,194 @@
 // bingo.routes.js
 const express = require('express');
+const cron = require('node-cron');
 const router = express.Router();
+require('dotenv').config();
+
 
 function configurarRutas(db) {
+    const intervalosActivos = new Map();
+
+    async function emitirEvento(numero, secuencia, fecha_bingo) {
+        try {
+            const numeroString = numero.toString();
+            
+            const mensaje = {
+                numero: numeroString,
+                sec: secuencia,
+                timestamp: new Date().toISOString()
+            };
+
+            const data = {
+                canal: process.env.SOCKET_CANAL,
+                token: process.env.SOCKET_TOKEN,
+                evento: `Bingo_${fecha_bingo}`,
+                mensaje: mensaje
+            };
+
+            console.log(`Enviando a socket.io: ${JSON.stringify(data)}`);
+            
+            const response = await fetch(process.env.SOCKET_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(JSON.stringify(data))
+                },
+                body: JSON.stringify(data)
+            });
+
+            const httpCode = response.status;
+            const responseData = await response.text();
+            
+            console.log('Status Code:', httpCode);
+            console.log('Response:', responseData);
+            
+            return {
+                httpCode,
+                response: responseData
+            };
+        } catch (error) {
+            console.error('Error al emitir evento:', error);
+            throw error;
+        }
+    }
+
+    function generarNuevoNumero(numerosActuales) {
+        const numerosUsados = numerosActuales ? numerosActuales.split(',').map(Number) : [];
+        let nuevoNumero;
+        do {
+            nuevoNumero = Math.floor(Math.random() * 75) + 1;
+        } while (numerosUsados.includes(nuevoNumero));
+        return nuevoNumero;
+    }
+
+
+    function iniciarGeneracionNumeros(bingoId) {
+        if (intervalosActivos.has(bingoId)) {
+            return;
+        }
+
+        const intervalo = setInterval(async () => {
+            try {
+                // Obtener información del bingo
+                const bingo = await new Promise((resolve, reject) => {
+                    db.get('SELECT numeros, empieza FROM bingos WHERE id = ?', [bingoId], (err, row) => {
+                        if (err) reject(err);
+                        else resolve(row);
+                    });
+                });
+
+                // Generar nuevo número
+                const nuevoNumero = generarNuevoNumero(bingo.numeros);
+                const numerosActuales = bingo.numeros ? bingo.numeros.split(',').map(Number) : [];
+                const secuencia = numerosActuales.length + 1;
+                const numerosActualizados = bingo.numeros ? `${bingo.numeros},${nuevoNumero}` : `${nuevoNumero}`;
+
+                // Actualizar en la base de datos
+                await new Promise((resolve, reject) => {
+                    db.run('UPDATE bingos SET numeros = ? WHERE id = ?', 
+                        [numerosActualizados, bingoId], 
+                        function(err) {
+                            if (err) reject(err);
+                            else resolve(this.changes);
+                        }
+                    );
+                });
+
+                // Emitir evento con el nuevo número
+                const fechaBingo = new Date(bingo.empieza).toISOString().split('T')[0];
+                await emitirEvento(nuevoNumero, secuencia, fechaBingo);
+
+                console.log(`Bingo ${bingoId}: Nuevo número generado: ${nuevoNumero} (${secuencia}/75)`);
+
+                // Verificar si completamos los 75 números
+                if (secuencia >= 75) {
+                    clearInterval(intervalosActivos.get(bingoId));
+                    intervalosActivos.delete(bingoId);
+                    
+                    await new Promise((resolve, reject) => {
+                        db.run('UPDATE bingos SET session = ? WHERE id = ?', 
+                            ['FINISHED', bingoId], 
+                            function(err) {
+                                if (err) reject(err);
+                                else resolve(this.changes);
+                            }
+                        );
+                    });
+                    
+                    console.log(`Bingo ${bingoId} completado con todos los números generados`);
+                }
+
+            } catch (error) {
+                console.error(`Error en generación de números para bingo ${bingoId}:`, error);
+            }
+        }, parseInt(process.env.INTERVALO) * 1000);
+
+        intervalosActivos.set(bingoId, intervalo);
+        console.log(`Iniciada generación de números para bingo ${bingoId}`);
+    }
+
+
+
+    async function actualizarBingoActual() {
+        const ahora = new Date();
+        const minutos = ahora.getMinutes();
+        
+        if (minutos !== 0 && minutos !== 30) {
+            console.log('No es momento de actualizar ningún bingo');
+            return;
+        }
+
+        console.log(`Verificando bingos a las ${ahora.toLocaleString()}`);
+
+        try {
+            const horaExacta = new Date(ahora);
+            horaExacta.setSeconds(0);
+            horaExacta.setMilliseconds(0);
+            
+            const bingoActual = await new Promise((resolve, reject) => {
+                db.get(`
+                    SELECT * FROM bingos 
+                    WHERE session = 'PROGRAMADA'
+                    AND datetime(empieza) = datetime(?)
+                `, [horaExacta.toISOString()], (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                });
+            });
+
+            if (bingoActual) {
+                // Actualizar el estado a 'RUNNING'
+                await new Promise((resolve, reject) => {
+                    db.run(`
+                        UPDATE bingos 
+                        SET session = 'RUNNING' 
+                        WHERE id = ?
+                    `, [bingoActual.id], function(err) {
+                        if (err) reject(err);
+                        else resolve(this.changes);
+                    });
+                });
+
+                console.log(`Bingo ${bingoActual.id} actualizado a RUNNING. Hora inicio: ${new Date(bingoActual.empieza).toLocaleString()}`);
+                
+                // Iniciar generación de números
+                iniciarGeneracionNumeros(bingoActual.id);
+            } else {
+                console.log('No hay bingo programado para iniciar en este momento exacto');
+            }
+        } catch (error) {
+            console.error('Error al actualizar estado del bingo:', error);
+        }
+    }
+
+    // Programar la tarea para que se ejecute en el minuto 00 y 30 de cada hora
+    cron.schedule('0,30 * * * *', () => {
+        actualizarBingoActual();
+    });
+
+    // También ejecutamos la verificación al iniciar el servidor
+    actualizarBingoActual();
+
     // Función para obtener las próximas 3 horas válidas desde ahora
     function obtenerProximasHoras(desde) {
         const horas = [];
@@ -181,6 +367,7 @@ function configurarRutas(db) {
                 termino,
                 observadores,
                 created_at,
+                numeros,
                 CASE 
                     WHEN datetime(empieza) > datetime('now') THEN 'futuro'
                     WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
@@ -188,7 +375,7 @@ function configurarRutas(db) {
             FROM bingos 
             ORDER BY datetime(empieza) DESC
         `;
-
+    
         db.all(query, [], (err, rows) => {
             if (err) {
                 res.status(500).json({ 
@@ -197,17 +384,27 @@ function configurarRutas(db) {
                 });
                 return;
             }
-
-            const registros = rows.map(row => ({
-                id: row.id,
-                estado: row.estado,
-                sesion: row.session,
-                inicio: new Date(row.empieza).toLocaleString(),
-                termino: row.termino ? new Date(row.termino).toLocaleString() : null,
-                observadores: row.observadores,
-                creado: new Date(row.created_at).toLocaleString()
-            }));
-
+    
+            const registros = rows.map(row => {
+                // Convertir string de números a array de números
+                const numerosArray = row.numeros ? row.numeros.split(',').map(Number) : [];
+                
+                return {
+                    id: row.id,
+                    estado: row.estado,
+                    sesion: row.session,
+                    inicio: new Date(row.empieza).toLocaleString(),
+                    termino: row.termino ? new Date(row.termino).toLocaleString() : null,
+                    observadores: row.observadores,
+                    creado: new Date(row.created_at).toLocaleString(),
+                    numeros: {
+                        lista: numerosArray,
+                        total: numerosArray.length,
+                        ultimoNumero: numerosArray.length > 0 ? numerosArray[numerosArray.length - 1] : null
+                    }
+                };
+            });
+    
             res.json({
                 success: true,
                 total: registros.length,
@@ -215,7 +412,8 @@ function configurarRutas(db) {
                 resumen: {
                     futuros: registros.filter(r => r.estado === 'futuro').length,
                     pasados: registros.filter(r => r.estado === 'pasado').length,
-                    totalObservadores: registros.reduce((sum, r) => sum + r.observadores, 0)
+                    totalObservadores: registros.reduce((sum, r) => sum + r.observadores, 0),
+                    bingosCompletados: registros.filter(r => r.numeros.total === 75).length
                 }
             });
         });
@@ -286,6 +484,45 @@ function configurarRutas(db) {
                     inicio: new Date(row.empieza).toLocaleString(),
                     observadores: row.observadores
                 }))
+            });
+        });
+    });
+
+
+    router.get('/actual', (req, res) => {
+        const ahora = new Date().toISOString();
+        db.get(`
+            SELECT * FROM bingos 
+            WHERE session = 'RUNNING'
+            ORDER BY empieza DESC 
+            LIMIT 1
+        `, [], (err, row) => {
+            if (err) {
+                res.status(500).json({ error: err.message });
+                return;
+            }
+
+            if (!row) {
+                res.json({
+                    success: true,
+                    mensaje: 'No hay ningún bingo en ejecución',
+                    bingoActual: null
+                });
+                return;
+            }
+
+            const numerosGenerados = row.numeros ? row.numeros.split(',').map(Number) : [];
+
+            res.json({
+                success: true,
+                bingoActual: {
+                    id: row.id,
+                    estado: row.session,
+                    inicio: new Date(row.empieza).toLocaleString(),
+                    observadores: row.observadores,
+                    numerosGenerados: numerosGenerados,
+                    totalNumeros: numerosGenerados.length
+                }
             });
         });
     });
