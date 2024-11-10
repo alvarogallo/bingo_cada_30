@@ -266,18 +266,21 @@ function obtenerProximasHoras(desde) {
     }
     horaInicio.seconds(0).milliseconds(0);
 
-    // Generar las 3 próximas horas
-    for (let i = 0; i < 3; i++) {
-        const nuevaHora = moment(horaInicio).tz(TIMEZONE);
-        if (i > 0) {
-            if (horaInicio.minutes() === 0) {
-                nuevaHora.minutes(30 * i);
-            } else {
-                nuevaHora.add(Math.floor((i + 1) / 2), 'hours');
-                nuevaHora.minutes(i % 2 === 0 ? 30 : 0);
-            }
+    // Solo agregar si es futuro
+    if (horaInicio.isAfter(moment())) {
+        horas.push(horaInicio.format());
+    }
+
+    // Agregar las siguientes dos horas
+    for (let i = 1; i < 3; i++) {
+        const siguienteHora = moment(horaInicio).tz(TIMEZONE);
+        if (horaInicio.minutes() === 0) {
+            siguienteHora.minutes(30 * i);
+        } else {
+            siguienteHora.add(Math.floor((i + 1) / 2), 'hours');
+            siguienteHora.minutes(i % 2 === 0 ? 30 : 0);
         }
-        horas.push(nuevaHora.format());
+        horas.push(siguienteHora.format());
     }
 
     return horas;
@@ -384,7 +387,7 @@ function obtenerProximasHoras(desde) {
     
             // Si hay menos de 3 bingos futuros, calcular las próximas horas necesarias
             const horasRequeridas = obtenerProximasHoras(ahora);
-            console.log('Horas requeridas:', horasRequeridas);
+            console.log('Horas requeridas:', horasRequeridas.map(h => moment(h).format('YYYY-MM-DD HH:mm:ss')));
     
             // Crear los bingos que faltan
             const nuevosBingos = [];
@@ -421,10 +424,13 @@ function obtenerProximasHoras(desde) {
                     success: true,
                     horaDisparo: ahora.format('YYYY-MM-DD HH:mm:ss'),
                     mensaje: 'Nuevos bingos creados para mantener horarios futuros',
+                    intervaloSegundos: parseInt(process.env.INTERVALO || '10'),
+                    zonaHoraria: TIMEZONE,
                     bingosFuturos: todosLosBingos.map(b => ({
                         id: b.id,
                         inicio: moment(b.empieza).format('YYYY-MM-DD HH:mm:ss'),
-                        observadores: b.observadores
+                        observadores: b.observadores,
+                        nombreEvento: `Bingo_${moment(b.empieza).format('YYYY-MM-DD_HH:mm')}`
                     }))
                 });
                 return;
@@ -455,10 +461,13 @@ function obtenerProximasHoras(desde) {
                 success: true,
                 horaDisparo: ahora.format('YYYY-MM-DD HH:mm:ss'),
                 mensaje: `Observador agregado al bingo ${proximoBingo.id}`,
+                intervaloSegundos: parseInt(process.env.INTERVALO || '10'),
+                zonaHoraria: TIMEZONE,
                 bingosFuturos: bingosFuturos.map(b => ({
                     id: b.id,
                     inicio: moment(b.empieza).format('YYYY-MM-DD HH:mm:ss'),
-                    observadores: b.id === proximoBingo.id ? bingoActualizado.observadores : b.observadores
+                    observadores: b.id === proximoBingo.id ? bingoActualizado.observadores : b.observadores,
+                    nombreEvento: `Bingo_${moment(b.empieza).format('YYYY-MM-DD_HH:mm')}`
                 }))
             });
     
