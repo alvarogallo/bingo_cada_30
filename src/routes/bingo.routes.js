@@ -460,66 +460,69 @@ async function limpiarBingosAntiguos() {
     });
 
     // Ruta para obtener todos los registros históricos
-    router.get('/registros', (req, res) => {
-        const query = `
-            SELECT 
-                id,
-                session,
-                empieza,
-                termino,
-                observadores,
-                created_at,
-                numeros,
-                CASE 
-                    WHEN datetime(empieza) > datetime('now') THEN 'futuro'
-                    WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
-                END as estado
-            FROM bingos 
-            ORDER BY datetime(empieza) DESC
-        `;
-    
-        db.all(query, [], (err, rows) => {
-            if (err) {
-                res.status(500).json({ 
-                    success: false, 
-                    error: err.message 
-                });
-                return;
-            }
-    
-            const registros = rows.map(row => {
-                // Convertir string de números a array de números
-                const numerosArray = row.numeros ? row.numeros.split(',').map(Number) : [];
-                
-                return {
-                    id: row.id,
-                    estado: row.estado,
-                    sesion: row.session,
-                    inicio: new Date(row.empieza).toLocaleString(),
-                    termino: row.termino ? new Date(row.termino).toLocaleString() : null,
-                    observadores: row.observadores,
-                    creado: new Date(row.created_at).toLocaleString(),
-                    numeros: {
-                        lista: numerosArray,
-                        total: numerosArray.length,
-                        ultimoNumero: numerosArray.length > 0 ? numerosArray[numerosArray.length - 1] : null
-                    }
-                };
+// En bingo.routes.js
+
+// Ruta para obtener todos los registros históricos con hora UTC
+router.get('/registros', (req, res) => {
+    const query = `
+        SELECT 
+            id,
+            session,
+            empieza,
+            termino,
+            observadores,
+            created_at,
+            numeros,
+            CASE 
+                WHEN datetime(empieza) > datetime('now') THEN 'futuro'
+                WHEN datetime(empieza) <= datetime('now') THEN 'pasado'
+            END as estado
+        FROM bingos 
+        ORDER BY datetime(empieza) DESC
+    `;
+
+    db.all(query, [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ 
+                success: false, 
+                error: err.message 
             });
-    
-            res.json({
-                success: true,
-                total: registros.length,
-                registros: registros,
-                resumen: {
-                    futuros: registros.filter(r => r.estado === 'futuro').length,
-                    pasados: registros.filter(r => r.estado === 'pasado').length,
-                    totalObservadores: registros.reduce((sum, r) => sum + r.observadores, 0),
-                    bingosCompletados: registros.filter(r => r.numeros.total === 75).length
+            return;
+        }
+
+        const registros = rows.map(row => {
+            const numerosArray = row.numeros ? row.numeros.split(',').map(Number) : [];
+            
+            return {
+                id: row.id,
+                estado: row.estado,
+                sesion: row.session,
+                inicio: new Date(row.empieza).toISOString(), // Formato UTC
+                termino: row.termino ? new Date(row.termino).toISOString() : null, // Formato UTC
+                observadores: row.observadores,
+                creado: new Date(row.created_at).toISOString(), // Formato UTC
+                numeros: {
+                    lista: numerosArray,
+                    total: numerosArray.length,
+                    ultimoNumero: numerosArray.length > 0 ? numerosArray[numerosArray.length - 1] : null
                 }
-            });
+            };
+        });
+
+        res.json({
+            success: true,
+            total: registros.length,
+            horaConsulta: new Date().toISOString(), // Hora actual en UTC
+            registros: registros,
+            resumen: {
+                futuros: registros.filter(r => r.estado === 'futuro').length,
+                pasados: registros.filter(r => r.estado === 'pasado').length,
+                totalObservadores: registros.reduce((sum, r) => sum + r.observadores, 0),
+                bingosCompletados: registros.filter(r => r.numeros.total === 75).length
+            }
         });
     });
+});
 
     // Ruta para obtener un registro específico
     router.get('/registro/:id', (req, res) => {
