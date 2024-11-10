@@ -230,21 +230,18 @@ function obtenerProximasHoras(desde) {
     }
     horaInicio.seconds(0).milliseconds(0);
 
-    // Solo agregar si es futuro
-    if (horaInicio.isAfter(moment())) {
-        horas.push(horaInicio.format());
-    }
-
-    // Agregar las siguientes dos horas
-    for (let i = 1; i < 3; i++) {
-        const siguienteHora = moment(horaInicio).tz(TIMEZONE);
-        if (horaInicio.minutes() === 0) {
-            siguienteHora.minutes(30 * i);
-        } else {
-            siguienteHora.add(Math.floor((i + 1) / 2), 'hours');
-            siguienteHora.minutes(i % 2 === 0 ? 30 : 0);
+    // Generar las 3 próximas horas
+    for (let i = 0; i < 3; i++) {
+        const nuevaHora = moment(horaInicio).tz(TIMEZONE);
+        if (i > 0) {
+            if (horaInicio.minutes() === 0) {
+                nuevaHora.minutes(30 * i);
+            } else {
+                nuevaHora.add(Math.floor((i + 1) / 2), 'hours');
+                nuevaHora.minutes(i % 2 === 0 ? 30 : 0);
+            }
         }
-        horas.push(siguienteHora.format());
+        horas.push(nuevaHora.format());
     }
 
     return horas;
@@ -254,30 +251,24 @@ function obtenerProximasHoras(desde) {
 
     // Función para crear nuevo bingo
     async function crearNuevoBingo(horaInicio) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Primero limpiar bingos antiguos
-                await limpiarBingosAntiguos();
-    
-                // Luego crear el nuevo bingo
-                db.run(`
-                    INSERT INTO bingos (session, empieza, numeros, termino, observadores)
-                    VALUES (?, ?, ?, ?, ?)
-                `, ['PROGRAMADA', horaInicio, '', '', 1],
-                function(err) {
-                    if (err) {
-                        console.error('Error al crear nuevo bingo:', err);
-                        reject(err);
-                    } else {
-                        console.log(`Nuevo bingo creado (ID: ${this.lastID}) programado para: ${horaInicio}`);
-                        resolve(this.lastID);
-                    }
-                });
-            } catch (error) {
-                reject(error);
-            }
+        return new Promise((resolve, reject) => {
+            db.run(`
+                INSERT INTO bingos (session, empieza, numeros, termino, observadores)
+                VALUES (?, ?, ?, ?, ?)
+            `, ['PROGRAMADA', horaInicio, '', '', 1],
+            function(err) {
+                if (err) {
+                    console.error('Error al crear nuevo bingo:', err);
+                    reject(err);
+                } else {
+                    console.log(`Nuevo bingo creado (ID: ${this.lastID}) programado para: ${horaInicio}`);
+                    resolve(this.lastID);
+                }
+            });
         });
     }
+
+
     router.get('/traer/:id', (req, res) => {
         const bingoId = req.params.id;
     
@@ -339,7 +330,7 @@ function obtenerProximasHoras(desde) {
     });
     // Ruta para disparo
     router.get('/disparo', async (req, res) => {
-        const ahora = new Date();
+        const ahora = moment().tz(TIMEZONE);
         
         try {
             // Obtener bingos futuros existentes
@@ -349,34 +340,33 @@ function obtenerProximasHoras(desde) {
                     WHERE session = 'PROGRAMADA' 
                     AND datetime(empieza) > datetime(?)
                     ORDER BY empieza ASC
-                `, [ahora.toISOString()], (err, rows) => {
+                `, [ahora.format()], (err, rows) => {
                     if (err) reject(err);
                     else resolve(rows);
                 });
             });
-
+    
             // Si hay menos de 3 bingos futuros, calcular las próximas horas necesarias
             const horasRequeridas = obtenerProximasHoras(ahora);
-            console.log('Horas requeridas:', horasRequeridas.map(h => h.toLocaleString()));
-
+            console.log('Horas requeridas:', horasRequeridas);
+    
             // Crear los bingos que faltan
             const nuevosBingos = [];
             for (const hora of horasRequeridas) {
-                const horaISO = hora.toISOString();
                 const existeBingo = bingosFuturos.some(bingo => 
-                    Math.abs(new Date(bingo.empieza).getTime() - hora.getTime()) < 1000 // tolerancia de 1 segundo
+                    moment(bingo.empieza).isSame(moment(hora))
                 );
-
+    
                 if (!existeBingo) {
                     const bingoId = await crearNuevoBingo(hora);
                     nuevosBingos.push({
                         id: bingoId,
-                        inicio: hora.toLocaleString(),
+                        inicio: moment(hora).format('YYYY-MM-DD HH:mm:ss'),
                         observadores: 1
                     });
                 }
             }
-
+    
             // Si se crearon nuevos bingos, obtener la lista actualizada
             if (nuevosBingos.length > 0) {
                 const todosLosBingos = await new Promise((resolve, reject) => {
@@ -385,25 +375,25 @@ function obtenerProximasHoras(desde) {
                         WHERE session = 'PROGRAMADA' 
                         AND datetime(empieza) > datetime(?)
                         ORDER BY empieza ASC
-                    `, [ahora.toISOString()], (err, rows) => {
+                    `, [ahora.format()], (err, rows) => {
                         if (err) reject(err);
                         else resolve(rows);
                     });
                 });
-
+    
                 res.json({
                     success: true,
-                    horaDisparo: ahora.toLocaleString(),
+                    horaDisparo: ahora.format('YYYY-MM-DD HH:mm:ss'),
                     mensaje: 'Nuevos bingos creados para mantener horarios futuros',
                     bingosFuturos: todosLosBingos.map(b => ({
                         id: b.id,
-                        inicio: new Date(b.empieza).toLocaleString(),
+                        inicio: moment(b.empieza).format('YYYY-MM-DD HH:mm:ss'),
                         observadores: b.observadores
                     }))
                 });
                 return;
             }
-
+    
             // Si no se crearon nuevos bingos, incrementar observadores del próximo
             const proximoBingo = bingosFuturos[0];
             await new Promise((resolve, reject) => {
@@ -416,7 +406,7 @@ function obtenerProximasHoras(desde) {
                     else resolve(this.changes);
                 });
             });
-
+    
             // Obtener bingo actualizado
             const bingoActualizado = await new Promise((resolve, reject) => {
                 db.get('SELECT * FROM bingos WHERE id = ?', [proximoBingo.id], (err, row) => {
@@ -424,18 +414,18 @@ function obtenerProximasHoras(desde) {
                     else resolve(row);
                 });
             });
-
+    
             res.json({
                 success: true,
-                horaDisparo: ahora.toLocaleString(),
+                horaDisparo: ahora.format('YYYY-MM-DD HH:mm:ss'),
                 mensaje: `Observador agregado al bingo ${proximoBingo.id}`,
                 bingosFuturos: bingosFuturos.map(b => ({
                     id: b.id,
-                    inicio: new Date(b.empieza).toLocaleString(),
+                    inicio: moment(b.empieza).format('YYYY-MM-DD HH:mm:ss'),
                     observadores: b.id === proximoBingo.id ? bingoActualizado.observadores : b.observadores
                 }))
             });
-
+    
         } catch (error) {
             console.error('Error en /disparo:', error);
             res.status(500).json({ 
