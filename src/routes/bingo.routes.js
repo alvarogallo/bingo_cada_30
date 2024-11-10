@@ -435,6 +435,54 @@ function obtenerProximasHoras(desde) {
         }
     });
 
+// En bingo.routes.js
+
+router.get('/test-socket', async (req, res) => {
+    try {
+        const testData = {
+            canal: process.env.SOCKET_CANAL,
+            token: process.env.SOCKET_TOKEN,
+            evento: 'TestSocket',
+            mensaje: {
+                test: true,
+                timestamp: moment().tz(TIMEZONE).format('YYYY-MM-DD HH:mm:ss')
+            }
+        };
+
+        console.log('Enviando test a socket.io:', testData);
+
+        const response = await fetch(process.env.SOCKET_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(JSON.stringify(testData))
+            },
+            body: JSON.stringify(testData)
+        });
+
+        const responseData = await response.text();
+
+        res.json({
+            success: true,
+            status: response.status,
+            response: responseData,
+            environmentVars: {
+                socketUrl: process.env.SOCKET_URL,
+                socketCanal: process.env.SOCKET_CANAL,
+                // No mostrar el token completo por seguridad
+                socketToken: process.env.SOCKET_TOKEN ? '***' + process.env.SOCKET_TOKEN.slice(-4) : null
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
     // Ruta para obtener todos los registros históricos
     router.get('/registros', (req, res) => {
         const query = `
