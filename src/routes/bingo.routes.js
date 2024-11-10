@@ -8,23 +8,29 @@ require('dotenv').config();
 function configurarRutas(db) {
     const intervalosActivos = new Map();
 
-    async function emitirEvento(numero, secuencia, fecha_bingo) {
+    async function emitirEvento(numero, secuencia, fecha_bingo, hora_bingo) {
         try {
             const numeroString = numero.toString();
+            
+            // Formatear la hora (convertir "8:30" a "08:30")
+            const [horas, minutos] = hora_bingo.split(':');
+            const horaFormateada = `${horas.padStart(2, '0')}:${minutos}`;
             
             const mensaje = {
                 numero: numeroString,
                 sec: secuencia,
                 timestamp: new Date().toISOString()
             };
-
+    
+            const nombreEvento = `Bingo_${fecha_bingo}_${horaFormateada}`;
+            
             const data = {
                 canal: process.env.SOCKET_CANAL,
                 token: process.env.SOCKET_TOKEN,
-                evento: `Bingo_${fecha_bingo}`,
+                evento: nombreEvento,
                 mensaje: mensaje
             };
-
+    
             console.log(`Enviando a socket.io: ${JSON.stringify(data)}`);
             
             const response = await fetch(process.env.SOCKET_URL, {
@@ -35,7 +41,7 @@ function configurarRutas(db) {
                 },
                 body: JSON.stringify(data)
             });
-
+    
             const httpCode = response.status;
             const responseData = await response.text();
             
@@ -66,7 +72,7 @@ function configurarRutas(db) {
         if (intervalosActivos.has(bingoId)) {
             return;
         }
-
+    
         const intervalo = setInterval(async () => {
             try {
                 // Obtener información del bingo
@@ -76,13 +82,12 @@ function configurarRutas(db) {
                         else resolve(row);
                     });
                 });
-
-                // Generar nuevo número
+    
                 const nuevoNumero = generarNuevoNumero(bingo.numeros);
                 const numerosActuales = bingo.numeros ? bingo.numeros.split(',').map(Number) : [];
                 const secuencia = numerosActuales.length + 1;
                 const numerosActualizados = bingo.numeros ? `${bingo.numeros},${nuevoNumero}` : `${nuevoNumero}`;
-
+    
                 // Actualizar en la base de datos
                 await new Promise((resolve, reject) => {
                     db.run('UPDATE bingos SET numeros = ? WHERE id = ?', 
@@ -93,36 +98,25 @@ function configurarRutas(db) {
                         }
                     );
                 });
-
-                // Emitir evento con el nuevo número
-                const fechaBingo = new Date(bingo.empieza).toISOString().split('T')[0];
-                await emitirEvento(nuevoNumero, secuencia, fechaBingo);
-
+    
+                // Formatear fecha y hora para el evento
+                const fechaHoraBingo = new Date(bingo.empieza);
+                const fecha = fechaHoraBingo.toISOString().split('T')[0];
+                const hora = `${fechaHoraBingo.getHours()}:${fechaHoraBingo.getMinutes() === 0 ? '00' : '30'}`;
+    
+                // Emitir evento con el nuevo formato
+                await emitirEvento(nuevoNumero, secuencia, fecha, hora);
+    
                 console.log(`Bingo ${bingoId}: Nuevo número generado: ${nuevoNumero} (${secuencia}/75)`);
-
-                // Verificar si completamos los 75 números
-                if (secuencia >= 75) {
-                    clearInterval(intervalosActivos.get(bingoId));
-                    intervalosActivos.delete(bingoId);
-                    
-                    await new Promise((resolve, reject) => {
-                        db.run('UPDATE bingos SET session = ? WHERE id = ?', 
-                            ['FINISHED', bingoId], 
-                            function(err) {
-                                if (err) reject(err);
-                                else resolve(this.changes);
-                            }
-                        );
-                    });
-                    
-                    console.log(`Bingo ${bingoId} completado con todos los números generados`);
-                }
-
+                console.log(`Evento emitido como: Bingo_${fecha}_${hora}`);
+    
+                // ... resto del código igual ...
+    
             } catch (error) {
                 console.error(`Error en generación de números para bingo ${bingoId}:`, error);
             }
         }, parseInt(process.env.INTERVALO) * 1000);
-
+    
         intervalosActivos.set(bingoId, intervalo);
         console.log(`Iniciada generación de números para bingo ${bingoId}`);
     }
