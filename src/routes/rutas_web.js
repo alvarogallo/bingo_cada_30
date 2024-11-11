@@ -270,9 +270,9 @@ function configurarRutasWeb(db) {
 
     <script>
         // Función para actualizar la página cada minuto
-        setInterval(() => {
-            window.location.reload();
-        }, 60000);
+        //setInterval(() => {
+        //    window.location.reload();
+        //}, 60000);
     </script>
 </body>
 </html>
